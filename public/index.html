@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Suivi des demandes d'actes</title>
+  <style>
+    :root { --bleu: #1f4fb4; --gris: #5b6472; --bord: #d9dde4; --fond: #f4f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--fond); color: #1c2230; }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    .sous-titre { margin: 0 0 20px; color: var(--gris); }
+    form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; background: #fff; padding: 16px; border: 1px solid var(--bord); border-radius: 8px; }
+    label { display: grid; gap: 4px; font-size: .85rem; color: var(--gris); }
+    input, select, button { font: inherit; padding: 8px 10px; border: 1px solid var(--bord); border-radius: 6px; }
+    input { width: 12rem; letter-spacing: .05em; }
+    button { background: var(--bleu); color: #fff; border-color: var(--bleu); cursor: pointer; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.secondaire { background: #fff; color: var(--bleu); }
+    #message { margin: 16px 0 0; padding: 10px 12px; border-radius: 6px; background: #fdecec; color: #8f1d1d; border: 1px solid #f3b9b9; }
+    #resume { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+    .puce { background: #fff; border: 1px solid var(--bord); border-radius: 999px; padding: 4px 12px; font-size: .85rem; }
+    .puce strong { margin-left: 4px; }
+    .table-conteneur { overflow-x: auto; background: #fff; border: 1px solid var(--bord); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--bord); font-size: .92rem; vertical-align: top; }
+    th { background: #eef1f7; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: .8rem; font-weight: 600; white-space: nowrap; }
+    .badge.DEPOSEE { background: #e8eefc; color: #1f4fb4; }
+    .badge.EN_COURS { background: #fff3d6; color: #8a5a00; }
+    .badge.VALIDEE { background: #dcf5e4; color: #1a6b3a; }
+    .badge.REJETEE { background: #fde3e3; color: #a12222; }
+    .motif { color: var(--gris); font-size: .85rem; }
+    #pagination { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 16px; }
+    .vide { text-align: center; color: var(--gris); padding: 24px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Suivi des demandes d'actes</h1>
+  <p class="sous-titre">Consultez les demandes d'un usager, de la plus récente à la plus ancienne.</p>
+
+  <form id="recherche">
+    <label>NPI de l'usager
+      <input id="npi" name="npi" inputmode="numeric" maxlength="10" placeholder="0123456789" autocomplete="off" required />
+    </label>
+    <label>Statut
+      <select id="statut"><option value="">Tous les statuts</option></select>
+    </label>
+    <button type="submit">Rechercher</button>
+  </form>
+
+  <p id="message" role="alert" hidden></p>
+  <div id="resume" hidden></div>
+
+  <div class="table-conteneur" id="resultats" hidden>
+    <table>
+      <thead>
+        <tr><th>N°</th><th>Type d'acte</th><th>Copies</th><th>Statut</th><th>Déposée le</th><th>Dernière mise à jour</th></tr>
+      </thead>
+      <tbody id="lignes"></tbody>
+    </table>
+    <p class="vide" id="vide" hidden>Aucune demande pour ces critères.</p>
+  </div>
+
+  <nav id="pagination" hidden aria-label="Pagination">
+    <button type="button" id="precedent" class="secondaire">← Précédent</button>
+    <span id="page-info"></span>
+    <button type="button" id="suivant" class="secondaire">Suivant →</button>
+  </nav>
+</main>
+
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const etat = { page: 1, referentiels: null };
+  const formatDate = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+
+  // Appel API : en cas d'erreur, on remonte le message clair renvoyé par le serveur.
+  async function appeler(chemin) {
+    const reponse = await fetch(chemin);
+    const corps = await reponse.json().catch(() => ({}));
+    if (!reponse.ok) throw new Error(corps.error?.message ?? `Erreur ${reponse.status}`);
+    return corps;
+  }
+
+  function afficherErreur(texte) {
+    $("message").textContent = texte;
+    $("message").hidden = !texte;
+  }
+
+  const libelleStatut = (code) => etat.referentiels.statuts.find((s) => s.code === code)?.libelle ?? code;
+  const libelleType = (code) => etat.referentiels.typesActe.find((t) => t.code === code)?.libelle ?? code;
+
+  function cellule(ligne, contenu) {
+    const td = document.createElement("td");
+    if (contenu instanceof Node) td.appendChild(contenu);
+    else td.textContent = contenu;
+    ligne.appendChild(td);
+    return td;
+  }
+
+  // Les données sont insérées avec textContent (jamais innerHTML) : pas de faille XSS.
+  function afficherLignes(demandes) {
+    const corps = $("lignes");
+    corps.replaceChildren();
+    for (const d of demandes) {
+      const tr = document.createElement("tr");
+      cellule(tr, String(d.id));
+      cellule(tr, libelleType(d.typeActe));
+      cellule(tr, String(d.nombreCopies));
+
+      const badge = document.createElement("span");
+      badge.className = `badge ${d.statut}`;
+      badge.textContent = libelleStatut(d.statut);
+      const tdStatut = cellule(tr, badge);
+      if (d.motifRejet) {
+        const motif = document.createElement("div");
+        motif.className = "motif";
+        motif.textContent = `Motif : ${d.motifRejet}`;
+        tdStatut.appendChild(motif);
+      }
+
+      cellule(tr, formatDate(d.creeLe));
+      cellule(tr, formatDate(d.modifieLe));
+      corps.appendChild(tr);
+    }
+    $("vide").hidden = demandes.length > 0;
+  }
+
+  function afficherResume({ total, parStatut }) {
+    const resume = $("resume");
+    resume.replaceChildren();
+    const puces = [["Total", total], ...Object.entries(parStatut).map(([code, n]) => [libelleStatut(code), n])];
+    for (const [nom, valeur] of puces) {
+      const puce = document.createElement("span");
+      puce.className = "puce";
+      puce.append(`${nom} :`);
+      const fort = document.createElement("strong");
+      fort.textContent = String(valeur);
+      puce.appendChild(fort);
+      resume.appendChild(puce);
+    }
+    resume.hidden = false;
+  }
+
+  async function charger() {
+    const npi = $("npi").value.trim();
+    const statut = $("statut").value;
+    afficherErreur("");
+
+    const params = new URLSearchParams({ page: String(etat.page) });
+    if (statut) params.set("statut", statut);
+
+    try {
+      const [liste, stats] = await Promise.all([
+        appeler(`/usagers/${encodeURIComponent(npi)}/demandes?${params}`),
+        appeler(`/demandes/statistiques?npi=${encodeURIComponent(npi)}`),
+      ]);
+      afficherResume(stats);
+      afficherLignes(liste.data);
+      $("resultats").hidden = false;
+
+      const { page, totalPages, total } = liste.pagination;
+      $("pagination").hidden = totalPages <= 1;
+      $("page-info").textContent = `Page ${page} / ${Math.max(totalPages, 1)} — ${total} demande(s)`;
+      $("precedent").disabled = page <= 1;
+      $("suivant").disabled = page >= totalPages;
+    } catch (erreur) {
+      $("resultats").hidden = true;
+      $("resume").hidden = true;
+      $("pagination").hidden = true;
+      afficherErreur(erreur.message);
+    }
+  }
+
+  $("recherche").addEventListener("submit", (evenement) => {
+    evenement.preventDefault();
+    etat.page = 1;
+    charger();
+  });
+  $("precedent").addEventListener("click", () => { etat.page -= 1; charger(); });
+  $("suivant").addEventListener("click", () => { etat.page += 1; charger(); });
+
+  // Au chargement : on récupère les statuts depuis l'API (une seule source de vérité).
+  appeler("/referentiels")
+    .then((referentiels) => {
+      etat.referentiels = referentiels;
+      for (const { code, libelle } of referentiels.statuts) {
+        $("statut").appendChild(new Option(libelle, code));
+      }
+    })
+    .catch((erreur) => afficherErreur(erreur.message));
+</script>
+</body>
+</html>
