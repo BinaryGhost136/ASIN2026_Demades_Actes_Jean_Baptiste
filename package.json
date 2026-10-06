@@ -1,0 +1,27 @@
+{
+  "name": "suivi-demandes-actes",
+  "version": "1.0.0",
+  "description": "API de suivi des demandes d'actes administratifs (ASIN - étude de cas développeur junior)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "tsx --disable-warning=ExperimentalWarning src/index.ts",
+    "dev": "tsx watch --disable-warning=ExperimentalWarning src/index.ts",
+    "seed": "tsx --disable-warning=ExperimentalWarning scripts/seed.ts",
+    "test": "tsx --disable-warning=ExperimentalWarning --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
+  }
+}
