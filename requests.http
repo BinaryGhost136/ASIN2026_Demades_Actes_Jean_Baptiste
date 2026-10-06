@@ -1,0 +1,65 @@
+# Scénario de recette — à utiliser avec l'extension « REST Client » de VS Code (ou Postman).
+# Lancer l'API d'abord : npm start
+
+@baseUrl = http://localhost:3000
+@npi = 0123456789
+
+### 1. Déposer une demande → 201, statut DEPOSEE
+POST {{baseUrl}}/demandes
+Content-Type: application/json
+
+{ "npi": "{{npi}}", "typeActe": "ACTE_NAISSANCE", "nombreCopies": 2 }
+
+### 1b. Dépôts refusés (400) : NPI trop court, type inconnu, copies hors limites
+POST {{baseUrl}}/demandes
+Content-Type: application/json
+
+{ "npi": "123", "typeActe": "PASSEPORT", "nombreCopies": 9 }
+
+### 2. Consulter les demandes d'un usager (récent d'abord)
+GET {{baseUrl}}/usagers/{{npi}}/demandes
+
+### 2b. Avec filtre par statut et pagination
+GET {{baseUrl}}/usagers/{{npi}}/demandes?statut=DEPOSEE&page=1&taille=20
+
+### 3a. Faire avancer : DEPOSEE → EN_COURS
+PATCH {{baseUrl}}/demandes/1/statut
+Content-Type: application/json
+
+{ "statut": "EN_COURS" }
+
+### 3b. EN_COURS → VALIDEE
+PATCH {{baseUrl}}/demandes/1/statut
+Content-Type: application/json
+
+{ "statut": "VALIDEE" }
+
+### 3c. Rejet SANS motif → 400
+PATCH {{baseUrl}}/demandes/2/statut
+Content-Type: application/json
+
+{ "statut": "REJETEE" }
+
+### 3d. Rejet motivé (la demande 2 doit d'abord être EN_COURS)
+PATCH {{baseUrl}}/demandes/2/statut
+Content-Type: application/json
+
+{ "statut": "REJETEE", "motifRejet": "Pièce justificative illisible" }
+
+### 4. Action interdite → 409 (une demande validée ne change plus)
+PATCH {{baseUrl}}/demandes/1/statut
+Content-Type: application/json
+
+{ "statut": "EN_COURS" }
+
+### 5. Détail d'une demande (404 si elle n'existe pas)
+GET {{baseUrl}}/demandes/1
+
+### 6. Bonus : nombre de demandes par statut
+GET {{baseUrl}}/demandes/statistiques
+
+### 6b. Par usager
+GET {{baseUrl}}/demandes/statistiques?npi={{npi}}
+
+### Référentiels (types, statuts, transitions)
+GET {{baseUrl}}/referentiels
